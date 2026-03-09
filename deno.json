@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "build": "./build.sh",
+    "test": "deno test --allow-ffi faiss_test.ts"
+  }
+}

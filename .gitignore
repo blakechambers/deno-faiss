@@ -1,0 +1,8 @@
+# Build artifacts (keep pre-built dylib checked in)
+native/linux-*/
+native/windows-*/
+native/darwin-x86_64/
+
+# Editor / OS
+.DS_Store
+*.swp

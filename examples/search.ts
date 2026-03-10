@@ -5,14 +5,14 @@
  * Default model: nomic-embed-text (run `ollama pull nomic-embed-text` first)
  *
  * Usage:
- *   deno run --allow-ffi --unstable-ffi --allow-net=localhost examples/embeds.ts
+ *   deno run --allow-ffi --allow-net=localhost examples/search.ts
  */
 import { FaissIndex } from "../mod.ts";
 
 const OLLAMA_URL = "http://localhost:11434/api/embeddings";
 const MODEL = "nomic-embed-text";
 
-async function embed(text: string): Promise<Float32Array> {
+async function embed(text: string): Promise<Float32Array<ArrayBuffer>> {
   const res = await fetch(OLLAMA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

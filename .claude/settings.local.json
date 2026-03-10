@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(which clang++ && clang++ --version)",
+      "Bash(xcode-select -p 2>/dev/null || echo \"Xcode CLI tools not found\")",
+      "Bash(xcrun --show-sdk-path)",
+      "Bash(./build.sh)",
+      "Bash(deno test:*)",
+      "Bash(deno run:*)",
+      "Bash(otool -L /Users/blake.chambers/projects/deno/faiss/native/darwin-arm64/libfaiss_wrapper.dylib)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:faiss.ai)",
+      "Bash(deno task:*)",
+      "Bash(deno lint:*)",
+      "Bash(deno check:*)"
+    ]
+  }
+}

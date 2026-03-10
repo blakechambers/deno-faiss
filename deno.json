@@ -1,4 +1,7 @@
 {
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1"
+  },
   "tasks": {
     "build": "./build.sh",
     "test": "deno test --allow-ffi faiss_test.ts"

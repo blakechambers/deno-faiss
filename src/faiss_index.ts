@@ -57,7 +57,7 @@ interface FaissLib {
  * All vectors must have the same dimensionality specified at construction time.
  */
 class FaissIndex {
-  private lib: FaissLib;
+  private lib: FaissLib | null;
   private indexPtr: Deno.UnsafePointer | null = null;
 
   // number of vectors currently in the index
@@ -104,7 +104,7 @@ class FaissIndex {
    * @param vectors - Flat Float32Array; length must be a multiple of `dimensions`.
    */
   public addVectors(vectors: Float32Array<ArrayBuffer>) {
-    if (!this.indexPtr) {
+    if (!this.indexPtr || !this.lib) {
       throw new Error("Index not initialized");
     }
 
@@ -142,7 +142,7 @@ class FaissIndex {
    * @param k - Maximum number of results to return.
    */
   public search(query: Float32Array<ArrayBuffer>, k: number) {
-    if (!this.indexPtr) {
+    if (!this.indexPtr || !this.lib) {
       throw new Error("Index not initialized");
     }
 
@@ -186,15 +186,212 @@ class FaissIndex {
    * Safe to call multiple times.
    */
   public close() {
-    if (this.indexPtr) {
+    if (this.indexPtr && this.lib) {
       this.lib.symbols.faiss_IndexFlatL2_free(this.indexPtr);
       this.indexPtr = null;
     }
 
     if (this.lib) {
       this.lib.close();
+      this.lib = null;
     }
   }
 }
 
-export { FaissIndex };
+interface ClusteringLib {
+  close: () => void;
+  symbols: {
+    faiss_Clustering_new: (d: number, k: number, niter: number) => Deno.PointerValue;
+    faiss_Clustering_train: (clustering: Deno.PointerValue, n: number, x: Deno.PointerValue) => number;
+    faiss_Clustering_get_centroids: (clustering: Deno.PointerValue, out: Deno.PointerValue) => void;
+    faiss_Clustering_assign: (clustering: Deno.PointerValue, n: number, x: Deno.PointerValue, labels: Deno.PointerValue) => void;
+    faiss_Clustering_free: (clustering: Deno.PointerValue) => void;
+  };
+}
+
+interface FaissClusteringOptions {
+  niter?: number;
+}
+
+/**
+ * A Deno FFI wrapper around FAISS `Clustering`.
+ *
+ * Performs k-means clustering to group vectors into k clusters and compute centroids.
+ * All vectors must have the same dimensionality specified at construction time.
+ */
+class FaissClustering {
+  private lib: ClusteringLib | null;
+  private clusteringPtr: Deno.PointerValue | null = null;
+  private dimensions: number;
+  private numClusters: number;
+  private trained: boolean = false;
+
+  /**
+   * Creates a new FAISS Clustering object.
+   * @param dimensions - Number of float32 components per vector.
+   * @param numClusters - Number of clusters (k) to create.
+   * @param options - Optional configuration (niter: number of k-means iterations, default 25).
+   */
+  constructor(dimensions: number, numClusters: number, options?: FaissClusteringOptions) {
+    const niter = options?.niter ?? 25;
+
+    const symbols: Deno.ForeignLibraryInterface = {
+      faiss_Clustering_new: {
+        parameters: ["i32", "i32", "i32"],
+        result: "pointer",
+      },
+      faiss_Clustering_train: {
+        parameters: ["pointer", "i32", "pointer"],
+        result: "i32",
+      },
+      faiss_Clustering_get_centroids: {
+        parameters: ["pointer", "pointer"],
+        result: "void",
+      },
+      faiss_Clustering_assign: {
+        parameters: ["pointer", "i32", "pointer", "pointer"],
+        result: "void",
+      },
+      faiss_Clustering_free: {
+        parameters: ["pointer"],
+        result: "void",
+      },
+    };
+
+    this.dimensions = dimensions;
+    this.numClusters = numClusters;
+
+    this.lib = Deno.dlopen(dylibPath, symbols) as unknown as ClusteringLib;
+    this.clusteringPtr = this.lib.symbols.faiss_Clustering_new(dimensions, numClusters, niter);
+  }
+
+  /**
+   * Trains the clustering on the provided vectors.
+   * @param vectors - Flat Float32Array; length must be a multiple of `dimensions`.
+   */
+  public train(vectors: Float32Array<ArrayBuffer>): void {
+    if (!this.clusteringPtr || !this.lib) {
+      throw new Error("Clustering not initialized");
+    }
+
+    const numVectors = vectors.length / this.dimensions;
+    if (!Number.isInteger(numVectors)) {
+      throw new Error(
+        `Vector length (${vectors.length}) not divisible by dimensions (${this.dimensions})`,
+      );
+    }
+
+    if (numVectors < this.numClusters) {
+      throw new Error(
+        `Number of training vectors (${numVectors}) must be at least the number of clusters (${this.numClusters})`,
+      );
+    }
+
+    const vectorPtr = UnsafePointer.of(vectors);
+    if (!vectorPtr) {
+      throw new Error("Failed to create vector pointer");
+    }
+
+    this.lib.symbols.faiss_Clustering_train(this.clusteringPtr, numVectors, vectorPtr);
+    this.trained = true;
+  }
+
+  /**
+   * Returns the computed centroids after training.
+   * @returns Array of centroid vectors, one Float32Array per cluster.
+   */
+  public getCentroids(): Float32Array[] {
+    if (!this.clusteringPtr || !this.lib) {
+      throw new Error("Clustering not initialized");
+    }
+
+    if (!this.trained) {
+      throw new Error("Clustering must be trained before getting centroids");
+    }
+
+    const flat = new Float32Array(this.numClusters * this.dimensions);
+    const flatPtr = UnsafePointer.of(flat);
+    if (!flatPtr) {
+      throw new Error("Failed to create centroids pointer");
+    }
+
+    this.lib.symbols.faiss_Clustering_get_centroids(this.clusteringPtr, flatPtr);
+
+    const centroids: Float32Array[] = [];
+    for (let i = 0; i < this.numClusters; i++) {
+      centroids.push(flat.slice(i * this.dimensions, (i + 1) * this.dimensions));
+    }
+    return centroids;
+  }
+
+  /**
+   * Assigns each input vector to its nearest cluster.
+   * @param vectors - Flat Float32Array; length must be a multiple of `dimensions`.
+   * @returns Int32Array of cluster indices, one per input vector.
+   */
+  public assign(vectors: Float32Array<ArrayBuffer>): Int32Array {
+    if (!this.clusteringPtr || !this.lib) {
+      throw new Error("Clustering not initialized");
+    }
+
+    if (!this.trained) {
+      throw new Error("Clustering must be trained before assigning vectors");
+    }
+
+    const numVectors = vectors.length / this.dimensions;
+    if (!Number.isInteger(numVectors)) {
+      throw new Error(
+        `Vector length (${vectors.length}) not divisible by dimensions (${this.dimensions})`,
+      );
+    }
+
+    const vectorPtr = UnsafePointer.of(vectors);
+    const labels = new BigInt64Array(numVectors);
+    const labelsPtr = UnsafePointer.of(labels);
+
+    if (!vectorPtr || !labelsPtr) {
+      throw new Error("Failed to create pointers for assign operation");
+    }
+
+    this.lib.symbols.faiss_Clustering_assign(this.clusteringPtr, numVectors, vectorPtr, labelsPtr);
+
+    return bigInt64ArrayToInt32Array(labels);
+  }
+
+  /**
+   * Frees the native FAISS clustering object and closes the shared library.
+   * Safe to call multiple times.
+   */
+  public close(): void {
+    if (this.clusteringPtr && this.lib) {
+      this.lib.symbols.faiss_Clustering_free(this.clusteringPtr);
+      this.clusteringPtr = null;
+    }
+
+    if (this.lib) {
+      this.lib.close();
+      this.lib = null;
+    }
+  }
+}
+
+/**
+ * Computes the squared L2 (Euclidean) distance between two vectors.
+ * This matches the distance metric used by FaissIndex and FaissClustering.
+ * @param a - First vector
+ * @param b - Second vector (must have same length as a)
+ * @returns Squared L2 distance
+ */
+function l2Distance(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) {
+    throw new Error(`Vector lengths must match: ${a.length} vs ${b.length}`);
+  }
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return sum;
+}
+
+export { FaissIndex, FaissClustering, l2Distance };

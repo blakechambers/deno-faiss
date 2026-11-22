@@ -19,7 +19,7 @@ Compile the thin C++ wrapper against your locally installed FAISS:
 
 This places the shared library under `native/<os>-<arch>/`.
 
-A pre-built `native/darwin-aarch64/libfaiss_wrapper.dylib` is included for Apple Silicon users who don't want to build from source.
+The library isn't checked in. The wrapper is C++ linked against your installed FAISS, so a prebuilt copy breaks when FAISS is upgraded (for example by `brew upgrade`). Re-run `./build.sh` after any FAISS upgrade. `deno task test` runs it for you.
 
 ## Usage
 

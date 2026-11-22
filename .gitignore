@@ -1,7 +1,9 @@
-# Build artifacts (keep pre-built dylib checked in)
-native/linux-*/
-native/windows-*/
-native/darwin-x86_64/
+# Build artifacts. Not checked in: the wrapper links against the locally
+# installed FAISS, and a prebuilt copy breaks when FAISS is upgraded.
+native/
+
+# Local Claude Code settings
+.claude/settings.local.json
 
 # Editor / OS
 .DS_Store
